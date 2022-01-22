@@ -1,0 +1,26 @@
+# environment variables
+*.env
+
+# pycache directories
+__pycache__
+
+# log files
+*.log
+
+# database
+# Temporary database files and database
+*.db-shm
+*.db-wal
+*.db
+
+# data
+Data
+
+bin
+etc
+include
+lib64
+lib/python3.8/site-packages/*
+!lib/python3.8/site-packages/edupage_api
+share
+External
