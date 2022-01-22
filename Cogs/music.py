@@ -9,6 +9,7 @@ import asyncio
 from dotenv import load_dotenv
 from collections import defaultdict
 from requests import get
+import queue
 
 
 # custom utilities
@@ -38,50 +39,43 @@ ffmpeg_options = {"options": "-vn"}
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
 
-def ytdl_search(arg):
-    try:
-        get(arg)
-    except:
-        video = ytdl.extract_info(f"ytsearch:{arg}", download=False)["entries"][0]
-    else:
-        video = ytdl.extract_info(arg, download=False)
-    return video
+class DownloadException:
+    Exception
 
 
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source: discord.FFmpegAudio, *, data, volume=0.5):
-        super().__init__(source, volume)
-
+class Song:
+    def __init__(self, data):
         self.data = data
+        self.cached = os.path.isfile(ytdl.prepare_filename(data))
+        self.url = data["webpage_url"]
 
-        self.title = data.get("title")
-        self.url = data.get("url")
+    async def cache(self):
+        if self.cached:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            downlad = await loop.run_in_executor(
+                None, lambda: ytdl.extract_info(self.url, download=True)
+            )
+        except:
+            raise DownloadException("Downloading the song failed.")
+        finally:
+            self.cached = True
 
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(
-            None, lambda: ytdl.extract_info(url, download=not stream)
-        )
-
-        if "entries" in data:
-            # take first item from a playlist
-            data = data["entries"][0]
-
-        filename = data["url"] if stream else ytdl.prepare_filename(data)
-        return cls(
-            discord.FFmpegPCMAudio(filename, **ffmpeg_options),
-            data=data,
-        )
-
-    @classmethod
-    async def stream_from_data(cls, data):
-        return cls(discord.FFmpegPCMAudio(data["url"]), data=data)
+    async def play(self):
+        await self.cache()
+        filename = ytdl.prepare_filename(self.data)
+        return discord.FFmpegPCMAudio(filename, **ffmpeg_options)
 
     @classmethod
-    async def download_and_play(cls, data):
-        filename = ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+    async def search(cls, arg):
+        try:
+            get(arg)
+        except:
+            video = ytdl.extract_info(f"ytsearch:{arg}", download=False)["entries"][0]
+        else:
+            video = ytdl.extract_info(arg, download=False)
+        return cls(video)
 
 
 GuildID = os.getenv("GUILD_ID")
@@ -91,7 +85,7 @@ Home_Guild = int(GuildID)
 class Music(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.queue = defaultdict(list)
+        self.queue = defaultdict(queue.Queue)
         self.volume = defaultdict(lambda: 100)
         self.caching = set()
 
@@ -116,10 +110,10 @@ class Music(commands.Cog):
         ctx: commands.Context,
         name: Option(str, "The URL or name of song to play.", required=True),
     ):
-        video_data = ytdl_search(name)
-        self.queue[ctx.guild.id].append(video_data)
+        song: Song = await Song.search(name)
+        self.queue[ctx.guild.id].put(song)
 
-        await ctx.respond(f"Added {video_data['webpage_url']} to queue.")
+        await ctx.respond(f"Added {song.url} to queue.")
         if not ctx.voice_client.is_playing():
             await self.play_from_queue(ctx)
 
@@ -133,27 +127,29 @@ class Music(commands.Cog):
         if ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             return
-        if not self.queue[ctx.guild.id]:
+        if self.queue[ctx.guild.id].empty():
             await log.warning("The queue is empty.")
             return
 
-        data = self.queue[ctx.guild.id][0]
-        del self.queue[ctx.guild.id][0]
-        if not os.path.isfile(ytdl.prepare_filename(data)):
+        song: Song = self.queue[ctx.guild.id].get()
+        if not song.cached:
             await ctx.channel.send(
                 "The song hasn't been played yet, please wait for it to cache."
             )
             self.caching.add(ctx.guild.id)
-        source = await YTDLSource.from_url(data["webpage_url"])
+        source = await song.play()
         if ctx.guild.id in self.caching:
             self.caching.remove(ctx.guild.id)
             await ctx.channel.send("Caching finished!")
         ctx.voice_client.play(
             source,
             after=lambda x: asyncio.run_coroutine_threadsafe(
-                self.play_from_queue(ctx), self.client.loop
+                self.after_song_end(ctx), self.client.loop
             ),
         )
+
+    async def after_song_end(self, ctx: commands.Context):
+        self.play_from_queue(ctx)
 
     @commands.slash_command(
         name="pause", description="Pause the current song.", guilds=[GuildID]
