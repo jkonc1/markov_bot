@@ -9,7 +9,6 @@ import asyncio
 from dotenv import load_dotenv
 from collections import defaultdict
 from requests import get
-import queue
 
 
 # custom utilities
@@ -48,6 +47,7 @@ class Song:
         self.data = data
         self.cached = os.path.isfile(ytdl.prepare_filename(data))
         self.url = data["webpage_url"]
+        self.title = data["title"]
 
     async def cache(self):
         if self.cached:
@@ -85,7 +85,7 @@ Home_Guild = int(GuildID)
 class Music(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.queue = defaultdict(queue.Queue)
+        self.queue = defaultdict(list)
         self.volume = defaultdict(lambda: 100)
         self.caching = set()
 
@@ -94,7 +94,7 @@ class Music(commands.Cog):
         await log.info("Music cog loaded.")
 
     @commands.slash_command(
-        name="join", description="Join the voice channel you're in.", guilds=[GuildID]
+        name="join", description="Join the voice channel you're in."
     )
     async def join(self, ctx: commands.Context):
         channel = ctx.author.voice.channel
@@ -104,14 +104,14 @@ class Music(commands.Cog):
             await channel.connect()
         await ctx.respond("Connected.", ephemeral=True)
 
-    @commands.slash_command(name="play", description="Play a song.", guilds=[GuildID])
+    @commands.slash_command(name="play", description="Play a song.")
     async def play(
         self,
         ctx: commands.Context,
         name: Option(str, "The URL or name of song to play.", required=True),
     ):
         song: Song = await Song.search(name)
-        self.queue[ctx.guild.id].put(song)
+        self.queue[ctx.guild.id].append(song)
 
         await ctx.respond(f"Added {song.url} to queue.")
         if not ctx.voice_client.is_playing():
@@ -127,11 +127,11 @@ class Music(commands.Cog):
         if ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             return
-        if self.queue[ctx.guild.id].empty():
+        if not self.queue[ctx.guild.id]:
             await log.warning("The queue is empty.")
             return
 
-        song: Song = self.queue[ctx.guild.id].get()
+        song: Song = self.queue[ctx.guild.id].pop(0)
         if not song.cached:
             await ctx.channel.send(
                 "The song hasn't been played yet, please wait for it to cache."
@@ -149,11 +149,9 @@ class Music(commands.Cog):
         )
 
     async def after_song_end(self, ctx: commands.Context):
-        self.play_from_queue(ctx)
+        await self.play_from_queue(ctx)
 
-    @commands.slash_command(
-        name="pause", description="Pause the current song.", guilds=[GuildID]
-    )
+    @commands.slash_command(name="pause", description="Pause the current song.")
     async def pause(self, ctx: commands.Context):
         if not ctx.voice_client.is_playing():
             await ctx.respond("No audio is being played.")
@@ -165,9 +163,7 @@ class Music(commands.Cog):
         ctx.voice_client.pause()
         await ctx.respond("Paused.")
 
-    @commands.slash_command(
-        name="resume", description="Resume playing the song.", guilds=[GuildID]
-    )
+    @commands.slash_command(name="resume", description="Resume playing the song.")
     async def resume(self, ctx: commands.Context):
         if ctx.voice_client.is_paused():
             ctx.voice_client.resume()
@@ -181,7 +177,6 @@ class Music(commands.Cog):
     @commands.slash_command(
         name="disconnect",
         description="Disconnect from voice channel.",
-        guilds=[GuildID],
     )
     async def disconnect(self, ctx: commands.Context):
         if not ctx.voice_client:
@@ -196,7 +191,8 @@ class Music(commands.Cog):
         await ctx.respond("Disconnected.")
 
     @commands.slash_command(
-        name="skip", description="Skip the current song.", guilds=[GuildID]
+        name="skip",
+        description="Skip the current song.",
     )
     async def skip(self, ctx: commands.Context):
         ctx.voice_client.stop()
@@ -265,6 +261,20 @@ class Music(commands.Cog):
         if ctx.guild.id in self.caching:
             await ctx.respond("Please wait, the song is being cached.")
             raise commands.CommandError("A song is being cached.")
+
+    @commands.slash_command(
+        name="show_queue", description="Show the list of songs currently in queue."
+    )
+    async def show_queue(self, ctx):
+        queue = self.queue[ctx.guild.id]
+        if not queue:
+            await ctx.respond("The queue is currently empty.")
+            return
+        await ctx.respond(
+            "\n".join(
+                f"{i+1}: {song.title} ({song.url})" for i, song in enumerate(queue)
+            )
+        )
 
 
 def setup(client):
