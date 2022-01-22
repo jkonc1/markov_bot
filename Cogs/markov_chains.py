@@ -81,7 +81,7 @@ class Markov_chains(commands.Cog):
         guild_ids=[Home_Guild, Awesome_Guild],
     )
     async def domekator(self, ctx: commands.Context, beginning: str = ""):
-        with open("messagelist.txt", "r") as messages:
+        with open("Data/messagelist.txt", "r") as messages:
             reply = await markov_generate(beginning, messages.readlines())
             await ctx.respond(reply)
 
