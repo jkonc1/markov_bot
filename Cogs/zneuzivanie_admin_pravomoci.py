@@ -41,13 +41,29 @@ class Zneuzivanie_admina(commands.Cog):
             "ID of the channel to move to.",
             required=True,
         ),
+        user_id: Option(
+            str,
+            "ID of the user to move (default yourself)",
+            required=False,
+        ),
     ):
-        for member in self.client.get_all_members():
-            if member.voice is not None and member.voice.channel.id == int(channel_id):
-                channel = member.voice.channel
-                author = channel.guild.get_member(ctx.author.id)
-                await author.move_to(channel)
-                await ctx.respond("Moved!")
+        if user_id is None:
+            user_id = ctx.author.id
+        user_id = int(user_id)
+        channel_id = int(channel_id)
+        for guild in self.client.guilds:
+            for voice in guild.voice_channels:
+                if voice.id == channel_id:
+                    user = guild.get_member(user_id)
+                    if user is None:
+                        ctx.respond(
+                            "No matching member in the guild with the requested voice channel."
+                        )
+                        return
+                    await user.move_to(voice)
+                    await ctx.respond("Moved!")
+                    return
+        ctx.respond("No such voice channel found!")
 
 
 def setup(client):

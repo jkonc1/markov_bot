@@ -174,14 +174,13 @@ class Edupage(commands.Cog):
                     notification_time > self.previous_notification_check_time
                     and notification_time < current_time
                 ):
-                    # TODO: make sure not to send a notification to one channel multiple times(by multiple users/subscribtions)
                     subscriptions = await db.records(
                         """select * from subscriptions where
                      Account = ? and ? regexp SourceName and
                       ? regexp DestinationName and ? regexp Type""",
                         user_id,
-                        notification.recipient,
                         notification.author,
+                        notification.recipient,
                         type(notification.event_type).__name__,
                     )
                     for subscription in subscriptions:
@@ -198,7 +197,9 @@ class Edupage(commands.Cog):
                             await channel.send(
                                 await self.print_notification(notification, user_id)
                             )
-                            already_sent.add((subscription["ChannelID"], notification.id))
+                            already_sent.add(
+                                (subscription["ChannelID"], notification.id)
+                            )
 
         self.previous_notification_check_time = current_time
 
