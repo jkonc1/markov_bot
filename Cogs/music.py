@@ -202,7 +202,6 @@ class Music(commands.Cog):
     @commands.slash_command(
         name="volume",
         description="Get or set the volume of the music.",
-        guild_ids=[Home_Guild],
     )
     async def volume(
         self,

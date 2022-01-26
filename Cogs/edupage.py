@@ -119,10 +119,14 @@ class Edupage(commands.Cog):
             str, "Filter notifications by sender. Supports regex.", required=False
         ),
         type: Option(
-            str, "Filter notifications by type. Supports regex.", required=False
+            str,
+            "Filter notifications by type (MESSAGE,HOMEWORK,GRADE,SUBSTITUTION,TIMETABLE,EVENT). Supports regex.",
+            required=False,
         ),
     ):
         # TODO support multiple edupage accounts per discord
+
+        type = type.replace(",", "|")
 
         account = await db.field(
             """select UserID from users where DiscordUserID=?""", ctx.author.id
@@ -181,7 +185,7 @@ class Edupage(commands.Cog):
                         user_id,
                         notification.author,
                         notification.recipient,
-                        type(notification.event_type).__name__,
+                        notification.event_type.name,
                     )
                     for subscription in subscriptions:
                         if (subscription["ChannelID"], notification.id) in already_sent:
