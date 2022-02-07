@@ -9,6 +9,8 @@ import sys
 from dotenv import load_dotenv
 import random
 from collections import defaultdict
+from PIL import Image, ImageDraw, ImageFont
+import textwrap
 
 # custom utilities
 from Utilities import log
@@ -50,6 +52,28 @@ async def markov_generate(beginning: str, quote_list) -> str:
     return result
 
 
+async def meme_generate(file, text):
+    image = Image.open(file)
+    x, y = image.size
+    font = ImageFont.truetype("truetype/dejavu/DejaVuSans-Bold.ttf", int(0.04 * x))
+    editable = ImageDraw.Draw(image)
+    margin = 40
+    offset = int(0.9 * y)
+    stroke_width = 3
+    for line in textwrap.wrap(text, width=35)[::-1]:
+        W, H = editable.textsize(line, font, stroke_width=stroke_width)
+        editable.text(
+            ((x - W) / 2, offset),
+            line,
+            font=font,
+            fill="#ffffff",
+            stroke_width=3,
+            stroke_fill="#000000",
+        )
+        offset -= H
+    return image.convert("RGB")
+
+
 class Markov_chains(commands.Cog):
     def __init__(self, client):
         self.client = client
@@ -84,6 +108,20 @@ class Markov_chains(commands.Cog):
         with open("Data/messagelist.txt", "r") as messages:
             reply = await markov_generate(beginning, messages.readlines())
             await ctx.respond(reply)
+
+    @commands.slash_command(
+        name="domekator2",
+        description="Generate a message similar to Domek's and insert it into his photo.",
+        guild_ids=[Home_Guild, Awesome_Guild],
+    )
+    async def domekator2(self, ctx: commands.Context, beginning: str = ""):
+        await ctx.defer()
+        with open("Data/messagelist.txt", "r") as messages:
+            reply = await markov_generate(beginning, messages.readlines())
+        file = "Data/domek_images/" + random.choice(os.listdir("Data/domek_images"))
+        image = await meme_generate(file, reply)
+        image.save("Data/domek.jpg")
+        await ctx.respond(file=discord.File("Data/domek.jpg"))
 
 
 def setup(client):

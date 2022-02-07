@@ -152,7 +152,7 @@ class Edupage(commands.Cog):
         account_discord_name = self.client.get_user(
             int(user["DiscordUserId"])
         ).display_name
-        res = f"""{str(notification.date_added)} - New notification at server {server} (subscription by {account_discord_name}): \n {notification.text}"""
+        res = f"""{str(notification.date_added)} - New notification at server {server} (subscription by {account_discord_name}) from {notification.author} to {notification.recipient}: \n {notification.text}"""
         if notification.attachments:
             res += f"Attachments: {', '.join(f'{i.filename}({i.url})' for i in notification.attachments)}"
         return res

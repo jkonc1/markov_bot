@@ -17,6 +17,8 @@ log = log.Logger("zneuzivanie_admina")
 GuildID = os.getenv("GUILD_ID")
 Home_Guild = int(GuildID)
 
+Awesome_Guild = 798164313863880734
+
 
 class Zneuzivanie_admina(commands.Cog):
     def __init__(self, client):
@@ -29,7 +31,7 @@ class Zneuzivanie_admina(commands.Cog):
     # Load
     @commands.slash_command(
         name="move",
-        guild_ids=[Home_Guild],
+        guild_ids=[Home_Guild, Awesome_Guild],
         description="Move to channel | owner-only command",
     )
     @permissions.is_owner()
@@ -57,13 +59,31 @@ class Zneuzivanie_admina(commands.Cog):
                     user = guild.get_member(user_id)
                     if user is None:
                         ctx.respond(
-                            "No matching member in the guild with the requested voice channel."
+                            "No matching member in the guild with the requested voice channel.",
+                            ephemeral=True,
                         )
                         return
                     await user.move_to(voice)
-                    await ctx.respond("Moved!")
+                    await ctx.respond("Moved!", ephemeral=True)
                     return
-        ctx.respond("No such voice channel found!")
+        await ctx.respond("No such voice channel found!", ephemeral=True)
+
+    @commands.slash_command(
+        name="delete_message",
+        guild_ids=[Home_Guild, Awesome_Guild],
+    )
+    @permissions.is_owner()
+    async def delete_message(
+        self,
+        ctx: commands.Context,
+        message_id: Option(
+            str,
+            "ID of the channel to move to.",
+            required=True,
+        ),
+    ):
+        message = await ctx.fetch_message(int(message_id))
+        await message.delete()
 
 
 def setup(client):
