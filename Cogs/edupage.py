@@ -9,7 +9,6 @@ import sys
 import typing
 import datetime
 from dotenv import load_dotenv
-from edupage_api.messages import EduNotification
 
 import Utilities.db.db as db
 
@@ -24,18 +23,6 @@ GuildID = os.getenv("GUILD_ID")
 Home_Guild = int(GuildID)
 
 
-def edutime_to_datetime(t: edupage_api.EduExactDateTime):
-    res = datetime.datetime(
-        year=int(t.date.year),
-        month=int(t.date.month),
-        day=int(t.date.day),
-        hour=int(t.time.hour),
-        minute=int(t.time.minute),
-        second=int(t.time.second),
-    )
-    return res
-
-
 class Edupage(commands.Cog):
     def __init__(self, client):
         self.client = client
@@ -47,14 +34,6 @@ class Edupage(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        accounts = await db.records("select * from users")
-        for account in accounts:
-            edupage = edupage_api.Edupage(
-                account["EdupageServer"],
-                account["EdupageUserName"],
-                account["EdupagePassword"],
-            )
-            edupage.login()
         self.check_for_new_notifications.start()
         await log.info("Edupage cog loaded.")
 
@@ -70,13 +49,13 @@ class Edupage(commands.Cog):
         password: Option(str, "The edupage password", required=True),
     ):
         server = server.replace(".edupage.org", "")
-        edupage = edupage_api.Edupage(server, username, password)
+        edupage = edupage_api.Edupage()
         try:
-            edupage.login()
-        except edupage_api.BadCredentialsException:
+            edupage.login(username, password, server)
+        except edupage_api.exceptions.BadCredentialsException:
             await ctx.respond("Wrong username or password.", ephemeral=True)
             return
-        except edupage_api.LoginDataParsingException:
+        except edupage_api.exceptions.LoginDataParsingException:
             await ctx.respond(
                 "Logging in failed, please try again later.", ephemeral=True
             )
@@ -120,13 +99,13 @@ class Edupage(commands.Cog):
         ),
         type: Option(
             str,
-            "Filter notifications by type (MESSAGE,HOMEWORK,GRADE,SUBSTITUTION,TIMETABLE,EVENT). Supports regex.",
+            "Filter notifications by type (check /list_edupage_notification_types). Supports regex.",
             required=False,
         ),
     ):
         # TODO support multiple edupage accounts per discord
 
-        type = type.replace(",", "|")
+        type = type.replace(",", "|").replace(" ", "").upper()
 
         account = await db.field(
             """select UserID from users where DiscordUserID=?""", ctx.author.id
@@ -145,16 +124,19 @@ class Edupage(commands.Cog):
         await ctx.respond("Sucessfully subscribed.")
 
     async def print_notification(
-        self, notification: edupage_api.EduNotification, user_id: str
+        self, notification: edupage_api.TimelineEvent, user_id: str
     ):
         user = await db.record("select * from users where UserID=?", user_id)
         server = user["EdupageServer"]
         account_discord_name = self.client.get_user(
             int(user["DiscordUserId"])
         ).display_name
-        res = f"""{str(notification.date_added)} - New notification at server {server} (subscription by {account_discord_name}) from {notification.author} to {notification.recipient}: \n {notification.text}"""
-        if notification.attachments:
-            res += f"Attachments: {', '.join(f'{i.filename}({i.url})' for i in notification.attachments)}"
+        res = f"""{str(notification.timestamp)} - New notification of type {notification.event_type.name} at server {server} (subscription by {account_discord_name}) from {notification.author} to {notification.recipient}: \n {notification.text}"""
+        if (
+            notification.additional_data
+            and "attachments" in notification.additional_data
+        ):
+            res += f"Attachments: {', '.join(f'{i.filename}({i.url})' for i in notification.additional_data['attachments'] )}"
         return res
 
     @tasks.loop(seconds=60)
@@ -165,30 +147,47 @@ class Edupage(commands.Cog):
         edupage_accounts = await db.records("select * from users")
         for account in edupage_accounts:
             user_id = account["UserID"]
-            edupage = edupage_api.Edupage(
-                account["EdupageServer"],
-                account["EdupageUserName"],
-                account["EdupagePassword"],
-            )
-            edupage.login()
-            notifications = edupage.get_notifications()
+            edupage = edupage_api.Edupage()
+            try:
+                edupage.login(
+                    account["EdupageUserName"],
+                    account["EdupagePassword"],
+                    account["EdupageServer"],
+                )
+                notifications = edupage.get_notifications()
+            except:
+                continue
             for notification in notifications:
-                notification_time = edutime_to_datetime(notification.date_added)
+                if (
+                    notification.event_type is None
+                    or notification.event_type.name.startswith("H_")
+                ):
+                    continue  # ignore helper notifications
+                notification_time = notification.timestamp
                 if (
                     notification_time > self.previous_notification_check_time
                     and notification_time < current_time
                 ):
-                    subscriptions = await db.records(
-                        """select * from subscriptions where
-                     Account = ? and ? regexp SourceName and
-                      ? regexp DestinationName and ? regexp Type""",
-                        user_id,
-                        notification.author,
-                        notification.recipient,
-                        notification.event_type.name,
-                    )
+                    try:
+                        subscriptions = await db.records(
+                            """select * from subscriptions where
+                         Account = ? and ? regexp SourceName and
+                          ? regexp DestinationName and ? regexp Type""",
+                            user_id,
+                            notification.author,
+                            notification.recipient,
+                            notification.event_type.name,
+                        )
+                    except Exception as e:
+                        log.error(
+                            f"db acess/regex error - {e}\n notification= {vars(notification)}"
+                        )
+                        continue
                     for subscription in subscriptions:
-                        if (subscription["ChannelID"], notification.id) in already_sent:
+                        if (
+                            subscription["ChannelID"],
+                            notification.event_id,
+                        ) in already_sent:
                             continue
                         channel = self.client.get_partial_messageable(
                             int(subscription["ChannelID"])
@@ -202,10 +201,19 @@ class Edupage(commands.Cog):
                                 await self.print_notification(notification, user_id)
                             )
                             already_sent.add(
-                                (subscription["ChannelID"], notification.id)
+                                (subscription["ChannelID"], notification.event_id)
                             )
 
         self.previous_notification_check_time = current_time
+
+    @commands.slash_command(name="list_edupage_notification_types")
+    async def list_edupage_notification_types(self, ctx: commands.Context):
+        l = [
+            i.name
+            for i in edupage_api.timeline.EventType
+            if not i.name.startswith("H_")
+        ]
+        await ctx.respond("\n".join(l), ephemeral=True)
 
 
 def setup(client):

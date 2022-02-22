@@ -15,9 +15,9 @@ BUILD_PATH = "./Utilities/db/build.sql"
 
 
 def regexp(expr, item):
-    if expr == "" or expr == None:
+    if expr == "" or expr is None:
         return True
-    if item == "":
+    if item == "" or item is None:
         return False
     print(item, expr)
     reg = re.compile(expr)
